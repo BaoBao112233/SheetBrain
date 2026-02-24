@@ -160,3 +160,5 @@ logs/
 # Backup files
 *.bak
 *.backup
+
+/test_folders/
