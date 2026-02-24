@@ -21,9 +21,12 @@ def main():
     parser.add_argument("--no-validation", action="store_true", help="Disable validation stage")
     parser.add_argument("--no-understanding", action="store_true", help="Disable understanding stage")
     parser.add_argument("--token-budget", type=int, default=10000, help="Token budget for context generation (default: 10000)")
-    parser.add_argument("--api-key", help="OpenAI API key (overrides config)")
-    parser.add_argument("--base-url", help="OpenAI base URL (overrides config)")
-    parser.add_argument("--deployment", help="Model deployment name (overrides config)")
+    parser.add_argument("--service-account", help="Path to Google service account JSON file (overrides config)")
+    parser.add_argument("--project-id", help="Google Cloud project ID (overrides config)")
+    parser.add_argument("--location", help="Google Cloud location (overrides config)")
+    parser.add_argument("--model-name", help="Model name (overrides config)")
+    parser.add_argument("--language", choices=["English", "Vietnamese", "Chinese", "Japanese", "Korean", "Spanish", "French", "German"], 
+                        default="English", help="Response language (default: English)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
 
     args = parser.parse_args()
@@ -33,12 +36,16 @@ def main():
         config = Config.from_env()
 
         # Override with command line arguments if provided
-        if args.api_key:
-            config.api_key = args.api_key
-        if args.base_url:
-            config.base_url = args.base_url
-        if args.deployment:
-            config.deployment = args.deployment
+        if args.service_account:
+            config.service_account_path = args.service_account
+        if args.project_id:
+            config.project_id = args.project_id
+        if args.location:
+            config.location = args.location
+        if args.model_name:
+            config.model_name = args.model_name
+        if args.language:
+            config.language = args.language
 
         # Initialize SheetBrain
         agent = SheetBrain(

@@ -11,7 +11,7 @@ import random
 from typing import Dict, Any, Optional
 
 from PIL import Image
-from openai import RateLimitError
+from langchain_core.messages import HumanMessage
 
 from utils.logger import setup_logger
 
@@ -24,20 +24,22 @@ class UnderstandingModule:
     Processes both table data and table images to extract visual context.
     """
 
-    def __init__(self, client, deployment: str, excel_context_understanding: str, workbook=None):
+    def __init__(self, llm, excel_context_understanding: str, workbook=None, language: str = "English", api_rate_limit_delay: float = 10.0):
         """
         Initialize the UnderstandingModule.
 
         Args:
-            client: OpenAI client instance
-            deployment: Model deployment name
+            llm: LangChain LLM instance (ChatVertexAI)
             excel_context_understanding: Excel context for understanding
             workbook: Excel workbook instance (optional)
+            language: Response language (default: English)
+            api_rate_limit_delay: Seconds to wait after successful API call (default: 10.0)
         """
-        self.client = client
-        self.deployment = deployment
+        self.llm = llm
         self.workbook = workbook
         self.excel_context_understanding = excel_context_understanding
+        self.language = language
+        self.api_rate_limit_delay = api_rate_limit_delay
 
     def analyze(self, user_question: str, table_image: Optional[Image.Image] = None) -> str:
         """
@@ -63,6 +65,8 @@ class UnderstandingModule:
         """Create a multimodal prompt for the LLM."""
 
         prompt_text = f"""You are an expert Excel data analyst. I need you to analyze the spreadsheet content and visual representation (if provided) to understand the context for answering a specific question.
+
+**IMPORTANT: Respond in {self.language} language.**
 
 **User Question:** {user_question}
 
@@ -119,39 +123,52 @@ Provide a comprehensive overview including:
 
         for attempt in range(max_retries):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=messages,
-                )
-                return response.choices[0].message.content
-
-            except RateLimitError as e:
-                last_exception = e
-                logger.warning(f"Rate limit hit, attempt {attempt + 1}/{max_retries}: {str(e)}")
-
-                # Extract wait time from error message if available
-                wait_time = self._extract_wait_time_from_error(str(e))
-
-                if attempt < max_retries - 1:
-                    if wait_time:
-                        delay = wait_time + random.uniform(1, 3)
-                        logger.info(f"Waiting {delay:.1f} seconds as suggested by API")
-                    else:
-                        delay = 10
-                        logger.info(f"Waiting {delay:.1f} seconds")
-
-                    time.sleep(delay)
-                else:
-                    logger.error(f"All {max_retries} attempts failed due to rate limiting")
-                    break
+                # Convert messages to LangChain format
+                langchain_messages = []
+                for msg in messages:
+                    if msg["role"] == "user":
+                        if isinstance(msg["content"], str):
+                            langchain_messages.append(HumanMessage(content=msg["content"]))
+                        elif isinstance(msg["content"], list):
+                            # Handle multimodal content
+                            content_parts = []
+                            for part in msg["content"]:
+                                if part["type"] == "text":
+                                    content_parts.append({"type": "text", "text": part["text"]})
+                                elif part["type"] == "image_url":
+                                    # Extract base64 data
+                                    image_data = part["image_url"]["url"].split(",")[1]
+                                    content_parts.append({
+                                        "type": "image_url",
+                                        "image_url": {"url": f"data:image/png;base64,{image_data}"}
+                                    })
+                            langchain_messages.append(HumanMessage(content=content_parts))
+                
+                response = self.llm.invoke(langchain_messages)
+                
+                # Sleep to respect rate limit
+                time.sleep(self.api_rate_limit_delay)
+                
+                return response.content
 
             except Exception as e:
                 last_exception = e
                 logger.error(f"API error, attempt {attempt + 1}/{max_retries}: {str(e)}")
 
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                    logger.info(f"Waiting {delay:.1f} seconds before retry")
+                    # Check if rate limit error
+                    if "rate limit" in str(e).lower() or "quota" in str(e).lower():
+                        wait_time = self._extract_wait_time_from_error(str(e))
+                        if wait_time:
+                            delay = wait_time + random.uniform(1, 3)
+                            logger.info(f"Waiting {delay:.1f} seconds as suggested by API")
+                        else:
+                            delay = 10
+                            logger.info(f"Waiting {delay:.1f} seconds")
+                    else:
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logger.info(f"Waiting {delay:.1f} seconds before retry")
+                    
                     time.sleep(delay)
                 else:
                     logger.error(f"All {max_retries} attempts failed")

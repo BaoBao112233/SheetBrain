@@ -7,6 +7,8 @@ import re
 import time
 from typing import Dict, Any, Optional
 
+from langchain_core.messages import HumanMessage
+
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -18,18 +20,20 @@ class ValidationModule:
     If issues are found, provides feedback for re-execution. If validation passes, confirms the final answer.
     """
 
-    def __init__(self, client, deployment: str, excel_context_understanding: str):
+    def __init__(self, llm, excel_context_understanding: str, language: str = "English", api_rate_limit_delay: float = 10.0):
         """
         Initialize the ValidationModule.
 
         Args:
-            client: OpenAI client instance
-            deployment: Model deployment name
+            llm: LangChain LLM instance (ChatVertexAI)
             excel_context_understanding: Excel context for understanding
+            language: Response language (default: English)
+            api_rate_limit_delay: Seconds to wait after successful API call (default: 10.0)
         """
-        self.client = client
-        self.deployment = deployment
+        self.llm = llm
         self.excel_context_understanding = excel_context_understanding
+        self.language = language
+        self.api_rate_limit_delay = api_rate_limit_delay
 
     def reflect(self, execution_result: Dict[str, Any], user_question: str, understanding_output: str) -> Dict[str, Any]:
         """
@@ -98,6 +102,8 @@ class ValidationModule:
         conversation_history_text = self._format_full_conversation_history(conversation_history)
 
         prompt_text = f"""You are an expert Excel data analysis validator. Your task is to thoroughly review and validate the execution process and final answer for an Excel analysis question.
+
+**IMPORTANT: Respond in {self.language} language.**
 
 **ORIGINAL USER QUESTION:**
 {user_question}
@@ -245,18 +251,24 @@ Please be thorough and objective in your assessment. If issues are found, focus 
 
         for attempt in range(max_retries):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=messages,
-                )
+                # Convert messages to LangChain format
+                langchain_messages = []
+                for msg in messages:
+                    if msg.get("role") == "user":
+                        langchain_messages.append(HumanMessage(content=msg["content"]))
+                
+                response = self.llm.invoke(langchain_messages)
 
                 print("="*50)
                 print("VALIDATION MODULE LLM RESPONSE CONTENT:")
                 print("="*50)
-                print(response.choices[0].message.content)
+                print(response.content)
                 print("="*50)
+                
+                # Sleep to respect rate limit
+                time.sleep(self.api_rate_limit_delay)
 
-                return response.choices[0].message.content
+                return response.content
 
             except Exception as e:
                 last_exception = e

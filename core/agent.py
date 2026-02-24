@@ -8,7 +8,7 @@ import time
 from typing import Dict, Any, Optional
 
 from PIL import Image
-from openai import OpenAI
+from langchain_google_vertexai import ChatVertexAI
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
@@ -48,10 +48,16 @@ class SheetBrain:
         self.total_token_budget = total_token_budget
         self.load_excel = load_excel
 
-        # Initialize OpenAI client
-        self.client = OpenAI(
-            api_key=self.config.api_key,
-            base_url=self.config.base_url
+        # Set up Google Cloud credentials
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.config.service_account_path
+        
+        # Initialize ChatVertexAI client
+        self.llm = ChatVertexAI(
+            model_name=self.config.model_name,
+            project=self.config.project_id,
+            location=self.config.location,
+            max_retries=self.config.max_retries,
+            temperature=0.0
         )
 
         # Initialize code execution environment
@@ -87,13 +93,13 @@ class SheetBrain:
 
         # Initialize the three modules
         self.understanding_module = UnderstandingModule(
-            self.client, self.config.deployment, self.excel_context_understanding, self.workbook
+            self.llm, self.excel_context_understanding, self.workbook, self.config.language, self.config.api_rate_limit_delay
         )
         self.execution_module = ExecutionModule(
-            self.client, self.config.deployment, self.code_globals, self.code_locals, self.excel_context_execution
+            self.llm, self.code_globals, self.code_locals, self.excel_context_execution, self.config.language, self.config.api_rate_limit_delay
         )
         self.validation_module = ValidationModule(
-            self.client, self.config.deployment, self.excel_context_understanding
+            self.llm, self.excel_context_understanding, self.config.language, self.config.api_rate_limit_delay
         )
 
     def run(self, user_question: str, table_image: Optional[Image.Image] = None,

@@ -11,7 +11,7 @@ import random
 import traceback
 from typing import Dict, Any, Optional, Tuple
 
-from openai import RateLimitError
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from utils.logger import setup_logger
 
@@ -24,29 +24,33 @@ class ExecutionModule:
     Handles its own conversation flow internally and returns the final result.
     """
 
-    def __init__(self, client, deployment: str, code_globals: dict, code_locals: dict,
-                 excel_context_execution: str):
+    def __init__(self, llm, code_globals: dict, code_locals: dict,
+                 excel_context_execution: str, language: str = "English", api_rate_limit_delay: float = 10.0):
         """
         Initialize the ExecutionModule.
 
         Args:
-            client: OpenAI client instance
-            deployment: Model deployment name
+            llm: LangChain LLM instance (ChatVertexAI)
             code_globals: Global variables for code execution
             code_locals: Local variables for code execution
             excel_context_execution: Excel context for execution
+            language: Response language (default: English)
+            api_rate_limit_delay: Seconds to wait after successful API call (default: 10.0)
         """
-        self.client = client
-        self.deployment = deployment
+        self.llm = llm
         self.code_globals = code_globals
         self.code_locals = code_locals
         self.excel_context_execution = excel_context_execution
+        self.language = language
+        self.api_rate_limit_delay = api_rate_limit_delay
         self.conversation_history = []
 
     def _get_system_prompt(self) -> dict:
         """Create the system prompt for the conversation."""
 
-        system_content = """You are an expert Excel data analyst with access to a comprehensive Python environment for Excel analysis.
+        system_content = f"""You are an expert Excel data analyst with access to a comprehensive Python environment for Excel analysis.
+
+**IMPORTANT: Respond in {self.language} language. However, code must remain in Python (English keywords), only comments and explanations should be in {self.language}.**
 
 **CODE EXECUTION ENVIRONMENT:**
 You have access to a Python environment with the following pre-loaded:
@@ -67,15 +71,15 @@ Available Excel Helper Functions:
 - `inspector_attribute(range_ref, attributes, sheet_name=None)`: Extract cell formatting and properties
   - **Usage:** `attrs = inspector_attribute("A1:B2", ["color", "font"], "Sheet1")`
   - **Attributes:** `["color", "font", "formula"]` - specify which properties to extract
-  - **Output:** Dict with structure: `{"range": "A1:B2", "sheet": "Sheet1", "attributes": {"color": {"A1": "#FF0000"}, "font": {"B2": "name:Arial; size:12; bold:True"}}}`
+  - **Output:** Dict with structure: `{{"range": "A1:B2", "sheet": "Sheet1", "attributes": {{"color": {{"A1": "#FF0000"}}, "font": {{"B2": "name:Arial; size:12; bold:True"}}}}}}`
 
 - `search(value, sheet_name=None, case_sensitive=False, search_type='partial')`: Find cells containing specific values
   - **Usage:** `matches = search("Total", case_sensitive=True, search_type="whole")`
   - **Search types:** `"partial"` (default), `"whole"`, `"strip"`
-  - **Output:** List of dicts: `[{"coordinate": "A5", "value": "Total Sales", "row": 5, "column": 1}]`
+  - **Output:** List of dicts: `[{{"coordinate": "A5", "value": "Total Sales", "row": 5, "column": 1}}]`
 
 - `apply_formatting(sheet_name, range_ref, format_dict)`: Apply cell formatting (colors, fonts, borders)
-  - **Usage:** `result = apply_formatting("Sheet1", "A1:C5", {"fill_color": "#FF0000", "bold": True})`
+  - **Usage:** `result = apply_formatting("Sheet1", "A1:C5", {{"fill_color": "#FF0000", "bold": True}})`
   - **Format Options:**
     - `fill_color`: Background color (hex: '#FF0000' or name: 'red')
     - `font_color`: Font color (hex: '#FF0000' or name: 'red')
@@ -373,54 +377,59 @@ Please start by exploring the data structure and then work toward answering the 
             return result[:10000] + "\n⚠️ **[OUTPUT TRUNCATED]** ⚠️\n"
 
     def _get_llm_response(self, max_retries: int = 5, base_delay: float = 1.0):
-        """Get response from OpenAI with retry logic."""
+        """Get response from LLM with retry logic."""
         last_exception = None
 
         for attempt in range(max_retries):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=self.conversation_history,
-                )
-
-                # Extract message
-                choice = response.choices[0]
-                message = choice.message
+                # Convert conversation history to LangChain format
+                langchain_messages = []
+                for msg in self.conversation_history:
+                    if isinstance(msg, dict):
+                        role = msg.get("role")
+                        content = msg.get("content")
+                        if role == "system":
+                            langchain_messages.append(SystemMessage(content=content))
+                        elif role == "user":
+                            langchain_messages.append(HumanMessage(content=content))
+                        elif role == "assistant":
+                            langchain_messages.append(AIMessage(content=content))
+                    else:
+                        # Already a LangChain message
+                        langchain_messages.append(msg)
+                
+                response = self.llm.invoke(langchain_messages)
 
                 print("="*50)
                 print("EXECUTION MODULE LLM RESPONSE:")
                 print("="*50)
-                print(message.content)
+                print(response.content)
                 print("="*50)
-                return message
-
-            except RateLimitError as e:
-                last_exception = e
-                logger.warning(f"Rate limit hit, attempt {attempt + 1}/{max_retries}: {str(e)}")
-
-                # Extract wait time from error message if available
-                wait_time = self._extract_wait_time_from_error(str(e))
-
-                if attempt < max_retries - 1:
-                    if wait_time:
-                        delay = wait_time + random.uniform(1, 3)
-                        logger.info(f"Waiting {delay:.1f} seconds as suggested by API")
-                    else:
-                        delay = 10
-                        logger.info(f"Waiting {delay:.1f} seconds (exponential backoff)")
-
-                    time.sleep(delay)
-                else:
-                    logger.error(f"All {max_retries} attempts failed due to rate limiting")
-                    break
+                
+                # Sleep to respect rate limit
+                time.sleep(self.api_rate_limit_delay)
+                
+                # Return a dict-like object compatible with existing code
+                return type('Message', (), {'content': response.content, 'role': 'assistant'})()
 
             except Exception as e:
                 last_exception = e
                 logger.error(f"API error, attempt {attempt + 1}/{max_retries}: {str(e)}")
 
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                    logger.info(f"Waiting {delay:.1f} seconds before retry")
+                    # Check if rate limit error
+                    if "rate limit" in str(e).lower() or "quota" in str(e).lower():
+                        wait_time = self._extract_wait_time_from_error(str(e))
+                        if wait_time:
+                            delay = wait_time + random.uniform(1, 3)
+                            logger.info(f"Waiting {delay:.1f} seconds as suggested by API")
+                        else:
+                            delay = 10
+                            logger.info(f"Waiting {delay:.1f} seconds (exponential backoff)")
+                    else:
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logger.info(f"Waiting {delay:.1f} seconds before retry")
+                    
                     time.sleep(delay)
                 else:
                     logger.error(f"All {max_retries} attempts failed")

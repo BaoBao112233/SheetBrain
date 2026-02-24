@@ -162,3 +162,4 @@ logs/
 *.backup
 
 /test_folders/
+service-account.json
