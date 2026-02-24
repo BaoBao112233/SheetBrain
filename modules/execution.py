@@ -120,10 +120,13 @@ Available Excel Helper Functions:
   - **Parameters:** `sheet_name` - specific sheet or None for all sheets
   - **Output:** List of dicts: `[{{'sheet': 'Sheet1', 'cell': 'B14', 'formula': '=SUM(B2:B12)', 'value': 550}}, ...]`
   - **CRITICAL for Natural Language Conversion:**
-    1. **Parse the formula** to extract ranges (e.g., B2:B12 from =SUM(B2:B12))
-    2. **Read column headers** from row 1 to understand what the column represents
-    3. **Read row context** from column A to understand what each row represents (e.g., months, products, dates)
-    4. **Create meaningful descriptions** using actual data context, NOT generic range references
+    1. **Parse the formula** to extract ranges (e.g., B2:B13 from =SUM(B2:B13))
+    2. **Read column header** from row 1 to understand what the column represents (e.g., "Doanh thu" = Revenue)
+    3. **Read field name/label** from column A at the SAME ROW as the formula cell (e.g., A14 = "Tổng")
+    4. **Use sheet name** as context (e.g., sheet "Năm 2021" indicates year 2021)
+    5. **Read row context** from column A for range cells to understand what they represent (e.g., months, products)
+    6. **Combine all context** to create meaningful descriptions: "Tổng doanh thu năm 2021" instead of "Tổng từ 1 đến 12"
+    7. **Handle sheet references** (e.g., ='Sheet1'!B14) by describing the reference clearly
   - **Example - Convert formulas to natural language:**
     ```python
     import re
@@ -132,18 +135,27 @@ Available Excel Helper Functions:
     result_sheet = new_wb.active
     result_sheet['A1'] = 'Sheet'
     result_sheet['B1'] = 'Cell'
-    result_sheet['C1'] = 'Natural Language Formula'
+    result_sheet['C1'] = 'Field Name'
+    result_sheet['D1'] = 'Natural Language Formula'
     
     for i, f in enumerate(formulas, start=2):
         result_sheet[f'A{{i}}'] = f['sheet']
         result_sheet[f'B{{i}}'] = f['cell']
         
-        # Parse formula to create natural language
+        # Get source sheet and formula cell row
         source_sheet = get_sheet(f['sheet'])
+        formula_row = int(re.search(r'\\d+', f['cell']).group())  # Extract row number from cell (e.g., 14 from B14)
+        
+        # Read field name from column A at the same row as formula
+        field_name_cell = source_sheet[f'A{{formula_row}}']
+        field_name = field_name_cell.value if field_name_cell.value else ''
+        result_sheet[f'C{{i}}'] = field_name
+        
+        # Parse formula to create natural language
         natural_lang = f['formula']  # Default fallback
         
-        # Example: Parse SUM formula
-        if 'SUM' in f['formula']:
+        # Example 1: Parse SUM formula with range
+        if 'SUM' in f['formula'] and ':' in f['formula']:
             match = re.search(r'SUM\\(([A-Z]+)(\\d+):([A-Z]+)(\\d+)\\)', f['formula'])
             if match:
                 col, start_row, _, end_row = match.groups()
@@ -152,16 +164,40 @@ Available Excel Helper Functions:
                 header_cell = source_sheet[f'{{col}}1']
                 column_name = header_cell.value if header_cell.value else col
                 
-                # Read row context from column A to understand the range
-                first_row_label_cell = source_sheet[f'A{{start_row}}']
-                last_row_label_cell = source_sheet[f'A{{end_row}}']
-                first_label = first_row_label_cell.value if first_row_label_cell.value else start_row
-                last_label = last_row_label_cell.value if last_row_label_cell.value else end_row
+                # Use sheet name for context (e.g., "Năm 2021" → year 2021)
+                sheet_context = f['sheet']
                 
-                # Create natural language: "Tổng [Column] từ [First] đến [Last]"
-                natural_lang = f'Tổng {{column_name}} từ tháng {{first_label}} đến tháng {{last_label}}'
+                # Read first and last row labels from column A
+                first_label = source_sheet[f'A{{start_row}}'].value if source_sheet[f'A{{start_row}}'].value else start_row
+                last_label = source_sheet[f'A{{end_row}}'].value if source_sheet[f'A{{end_row}}'].value else end_row
+                
+                # Create meaningful description combining all context
+                # Example: "Tổng doanh thu năm 2021" instead of "Tổng từ 1 đến 12"
+                # Avoid duplicating "Tổng" if it's already in column header
+                if field_name and column_name:
+                    # If column already contains field name, don't duplicate
+                    if field_name.lower() in column_name.lower():
+                        # Check if range represents years or specific items
+                        if str(first_label).isdigit() and str(last_label).isdigit() and len(str(first_label)) == 4:
+                            # Years range: "Tổng doanh thu năm 2021 và 2022"
+                            natural_lang = f'{{column_name}} năm {{first_label}} và {{last_label}}'
+                        else:
+                            # Generic context: "Tổng doanh thu năm 2021"
+                            natural_lang = f'{{column_name}} {{sheet_context}}'
+                    else:
+                        natural_lang = f'{{field_name}} {{column_name.lower()}} {{sheet_context}}'
+                else:
+                    natural_lang = f'Tổng {{column_name}} từ tháng {{first_label}} đến tháng {{last_label}}'
         
-        result_sheet[f'C{{i}}'] = natural_lang  # NATURAL LANGUAGE DESCRIPTION
+        # Example 2: Parse sheet reference (='Sheet'!Cell)
+        elif '!' in f['formula']:
+            match = re.search(r"='([^']+)'!([A-Z]+\\d+)", f['formula'])
+            if match:
+                ref_sheet, ref_cell = match.groups()
+                # Describe the reference clearly
+                natural_lang = f'Tham chiếu đến {{ref_cell}} trên sheet "{{ref_sheet}}"'
+        
+        result_sheet[f'D{{i}}'] = natural_lang  # NATURAL LANGUAGE DESCRIPTION
     
     save_workbook_as(new_wb, 'formulas.xlsx')
     ```
@@ -217,12 +253,20 @@ CRITICAL REQUIREMENTS:
 - **To create NEW Excel files**: Use `create_new_workbook()` to get a new workbook, then `save_workbook_as(new_wb, "filename.xlsx")`
 - **To extract formulas and convert to natural language**:
   - Use `get_all_formulas()` to extract formulas
-  - **Parse formulas** using regex to extract cell ranges (e.g., B2:B12 from =SUM(B2:B12))
+  - **Parse formulas** using regex to extract cell ranges, sheet references
   - **Read column headers** (row 1) to understand what data represents (e.g., "Doanh thu", "Revenue")
-  - **Read row labels** (column A) to understand context (e.g., "Tháng 1", "Product A")
-  - **Create meaningful descriptions** using actual context: "Tổng Doanh thu từ tháng 1 đến tháng 12"
-  - **AVOID generic descriptions** like "Tổng của phạm vi B2:B12" or "Sum of range B2:B12"
-  - **Output format**: Create 3 columns - Sheet, Cell, Natural Language Formula (do NOT include original Excel formula)
+  - **Read field name** from column A at the SAME ROW as the formula (e.g., A14 = "Tổng")
+  - **Use sheet name** as context (e.g., "Năm 2021" = year 2021)
+  - **Read row labels** (column A) for range cells to understand context (e.g., months, products)
+  - **Create meaningful descriptions** combining ALL context: "Tổng doanh thu năm 2021" NOT "Tổng từ 1 đến 12"
+  - **Output format**: Create 4 columns - Sheet, Cell, Field Name, Natural Language Formula
+  - **Examples of GOOD natural language**:
+    - "Tổng doanh thu năm 2021" (combines field name + column header + sheet context)
+    - "Tổng doanh thu từ tháng 1 đến tháng 12" (combines field + column + range)
+    - "Tổng doanh thu năm 2021 và 2022" (combines field + column + multiple years)
+  - **Examples of BAD natural language** (AVOID):
+    - "Tổng từ 1 đến 12" (missing column context)
+    - "Tổng của phạm vi B2:B13" (generic range, not meaningful)
 
 ### Multi-Table in One Sheet – Instructions
 1. **Detect Multiple Tables**
