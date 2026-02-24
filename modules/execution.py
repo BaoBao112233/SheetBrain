@@ -54,10 +54,11 @@ class ExecutionModule:
 
 **CODE EXECUTION ENVIRONMENT:**
 You have access to a Python environment with the following pre-loaded:
-- openpyxl library for Excel operations
+- openpyxl library for Excel operations (you can use `openpyxl.Workbook()` directly to create new workbooks)
 - Pandas for data operations
 - Helper functions for common Excel operations
-- The workbook is already loaded as 'workbook' variable
+- The current workbook is already loaded as 'workbook' variable
+- numpy (as `np`) and pandas (as `pd`) are available
 
 Available Excel Helper Functions:
 - `get_sheet(sheet_name=None)`: Get worksheet by name or active sheet
@@ -97,9 +98,73 @@ Available Excel Helper Functions:
   - **Prerequisites:** Create matplotlib plot first with `plt.plot()` or similar
   - **Output:** String message: `"Chart saved to Charts!D5"` or `"No plot to save"`
 
-- `save_workbook()`: Save workbook to file with '_output' postfix
+- `save_workbook()`: Save current workbook to file with '_output' postfix
   - **Usage:** `filename = save_workbook()`
   - **Output:** Returns saved filename string: `"/path/to/original_output.xlsx"` and prints confirmation message
+
+- `create_new_workbook()`: Create a new empty Excel workbook
+  - **Usage:** `new_wb = create_new_workbook()`
+  - **Output:** Returns openpyxl.Workbook object that you can work with
+  - **Example:** Create new workbook, add data, then save with `save_workbook_as(new_wb, "myfile.xlsx")`
+
+- `save_workbook_as(workbook, filename)`: Save any workbook with custom filename
+  - **Usage:** `path = save_workbook_as(new_wb, "formula.xlsx")` or `save_workbook_as(workbook, "/absolute/path/file.xlsx")`
+  - **Parameters:** 
+    - `workbook`: Workbook instance to save (can be the loaded 'workbook' or a new one from `create_new_workbook()`)
+    - `filename`: Output filename - use relative path (e.g., "output.xlsx") or absolute path
+  - **Output:** Returns absolute path of saved file
+
+- `get_all_formulas(sheet_name=None)`: Extract all Excel formulas from the file
+  - **Usage:** `formulas = get_all_formulas()` or `formulas = get_all_formulas("Sheet1")`
+  - **Important:** This function re-loads the workbook to access formulas (main workbook is loaded with data_only=True)
+  - **Parameters:** `sheet_name` - specific sheet or None for all sheets
+  - **Output:** List of dicts: `[{{'sheet': 'Sheet1', 'cell': 'B14', 'formula': '=SUM(B2:B12)', 'value': 550}}, ...]`
+  - **CRITICAL for Natural Language Conversion:**
+    1. **Parse the formula** to extract ranges (e.g., B2:B12 from =SUM(B2:B12))
+    2. **Read column headers** from row 1 to understand what the column represents
+    3. **Read row context** from column A to understand what each row represents (e.g., months, products, dates)
+    4. **Create meaningful descriptions** using actual data context, NOT generic range references
+  - **Example - Convert formulas to natural language:**
+    ```python
+    import re
+    formulas = get_all_formulas()
+    new_wb = create_new_workbook()
+    result_sheet = new_wb.active
+    result_sheet['A1'] = 'Sheet'
+    result_sheet['B1'] = 'Cell'
+    result_sheet['C1'] = 'Natural Language Formula'
+    
+    for i, f in enumerate(formulas, start=2):
+        result_sheet[f'A{{i}}'] = f['sheet']
+        result_sheet[f'B{{i}}'] = f['cell']
+        
+        # Parse formula to create natural language
+        source_sheet = get_sheet(f['sheet'])
+        natural_lang = f['formula']  # Default fallback
+        
+        # Example: Parse SUM formula
+        if 'SUM' in f['formula']:
+            match = re.search(r'SUM\\(([A-Z]+)(\\d+):([A-Z]+)(\\d+)\\)', f['formula'])
+            if match:
+                col, start_row, _, end_row = match.groups()
+                
+                # Read column header to understand what we're summing
+                header_cell = source_sheet[f'{{col}}1']
+                column_name = header_cell.value if header_cell.value else col
+                
+                # Read row context from column A to understand the range
+                first_row_label_cell = source_sheet[f'A{{start_row}}']
+                last_row_label_cell = source_sheet[f'A{{end_row}}']
+                first_label = first_row_label_cell.value if first_row_label_cell.value else start_row
+                last_label = last_row_label_cell.value if last_row_label_cell.value else end_row
+                
+                # Create natural language: "Tổng [Column] từ [First] đến [Last]"
+                natural_lang = f'Tổng {{column_name}} từ tháng {{first_label}} đến tháng {{last_label}}'
+        
+        result_sheet[f'C{{i}}'] = natural_lang  # NATURAL LANGUAGE DESCRIPTION
+    
+    save_workbook_as(new_wb, 'formulas.xlsx')
+    ```
 
 **RESPONSE FORMATS - MANDATORY COMPLIANCE:**
 
@@ -147,8 +212,17 @@ CRITICAL REQUIREMENTS:
 - Print intermediate results to show your thought process
 - Use the helper functions for common operations
 - **Identify hierarchical relationships** (e.g., "of which", "including", indented items)
-- Use `save_workbook()` to save changes
-- **ALWAYS call `save_workbook()` after making ANY changes to the Excel file**
+- Use `save_workbook()` to save changes to the CURRENT workbook
+- **ALWAYS call `save_workbook()` after making ANY changes to the CURRENT Excel file**
+- **To create NEW Excel files**: Use `create_new_workbook()` to get a new workbook, then `save_workbook_as(new_wb, "filename.xlsx")`
+- **To extract formulas and convert to natural language**:
+  - Use `get_all_formulas()` to extract formulas
+  - **Parse formulas** using regex to extract cell ranges (e.g., B2:B12 from =SUM(B2:B12))
+  - **Read column headers** (row 1) to understand what data represents (e.g., "Doanh thu", "Revenue")
+  - **Read row labels** (column A) to understand context (e.g., "Tháng 1", "Product A")
+  - **Create meaningful descriptions** using actual context: "Tổng Doanh thu từ tháng 1 đến tháng 12"
+  - **AVOID generic descriptions** like "Tổng của phạm vi B2:B12" or "Sum of range B2:B12"
+  - **Output format**: Create 3 columns - Sheet, Cell, Natural Language Formula (do NOT include original Excel formula)
 
 ### Multi-Table in One Sheet – Instructions
 1. **Detect Multiple Tables**

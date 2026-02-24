@@ -286,6 +286,90 @@ class ExcelToolkit:
         print(f"💾 Workbook saved to: {filename}")
         return filename
 
+    def create_new_workbook(self) -> object:
+        """Create a new empty Excel workbook.
+        
+        Returns:
+            openpyxl.Workbook: New workbook instance
+        """
+        from openpyxl import Workbook
+        new_wb = Workbook()
+        print("✅ New workbook created")
+        return new_wb
+
+    def save_workbook_as(self, workbook: object, filename: str) -> str:
+        """Save a workbook with custom filename.
+        
+        Args:
+            workbook: The workbook instance to save
+            filename: Output filename (can be absolute or relative path)
+        
+        Returns:
+            str: The saved filename path
+        """
+        # If relative path, save relative to current excel_path directory
+        if not os.path.isabs(filename):
+            dir_path = os.path.dirname(self.excel_path) or '.'
+            filename = os.path.join(dir_path, filename)
+        
+        workbook.save(filename)
+        print(f"💾 Workbook saved to: {filename}")
+        return filename
+
+    def get_all_formulas(self, sheet_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Extract all formulas from the Excel file.
+        
+        This function re-loads the workbook with data_only=False to access formulas.
+        The main workbook is loaded with data_only=True for calculations.
+        
+        Args:
+            sheet_name: Specific sheet name, or None to check all sheets
+        
+        Returns:
+            List of dicts with formula information:
+            [
+                {
+                    'sheet': 'Sheet1',
+                    'cell': 'B14',
+                    'formula': '=SUM(B2:B12)',
+                    'value': 550  # Calculated value
+                },
+                ...
+            ]
+        """
+        from openpyxl import load_workbook
+        
+        # Load workbook with formulas preserved
+        wb_with_formulas = load_workbook(self.excel_path, data_only=False)
+        formulas = []
+        
+        sheets_to_check = [sheet_name] if sheet_name else wb_with_formulas.sheetnames
+        
+        for sname in sheets_to_check:
+            if sname not in wb_with_formulas.sheetnames:
+                print(f"⚠️ Sheet '{sname}' not found")
+                continue
+                
+            sheet = wb_with_formulas[sname]
+            
+            for row in sheet.iter_rows():
+                for cell in row:
+                    # Check if cell contains a formula
+                    if cell.data_type == 'f' and cell.value:
+                        # Get the calculated value from the main workbook
+                        main_sheet = self.workbook[sname]
+                        calculated_value = main_sheet[cell.coordinate].value
+                        
+                        formulas.append({
+                            'sheet': sname,
+                            'cell': cell.coordinate,
+                            'formula': str(cell.value),
+                            'value': calculated_value
+                        })
+        
+        print(f"✅ Found {len(formulas)} formula(s) in the workbook")
+        return formulas
+
     # Excel editing functions
     def insert_rows(self, sheet_name: str, row_index: int, count: int = 1) -> str:
         """Insert empty rows at the specified position."""
@@ -618,6 +702,9 @@ class ExcelToolkit:
             'get_sheet_as_dataframe': self.get_sheet_as_dataframe,
             'save_plot_to_excel': self.save_plot_to_excel,
             'save_workbook': self.save_workbook,
+            'create_new_workbook': self.create_new_workbook,
+            'save_workbook_as': self.save_workbook_as,
+            'get_all_formulas': self.get_all_formulas,
             #additional editing tools
             'insert_rows': self.insert_rows,
             'insert_columns': self.insert_columns,
