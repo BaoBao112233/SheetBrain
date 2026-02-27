@@ -259,11 +259,11 @@ Please be thorough and objective in your assessment. If issues are found, focus 
                 
                 response = self.llm.invoke(langchain_messages)
 
-                print("="*50)
-                print("VALIDATION MODULE LLM RESPONSE CONTENT:")
-                print("="*50)
-                print(response.content)
-                print("="*50)
+                # print("="*50)
+                # print("VALIDATION MODULE LLM RESPONSE CONTENT:")
+                # print("="*50)
+                # print(response.content)
+                # print("="*50)
                 
                 # Sleep to respect rate limit
                 time.sleep(self.api_rate_limit_delay)

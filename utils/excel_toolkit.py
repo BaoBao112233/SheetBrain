@@ -272,6 +272,15 @@ class ExcelToolkit:
         base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
         filename = os.path.join(dir_path, f"{base_name}_output.xlsx")
 
+        # Fix for "I/O operation on closed file" error with images
+        # Remove all images from all sheets to avoid openpyxl image handling issues
+        try:
+            for sheet in self.workbook.worksheets:
+                if hasattr(sheet, '_images') and sheet._images:
+                    sheet._images = []
+        except Exception as e:
+            print(f"⚠️ Warning: Could not remove images: {e}")
+
         self.workbook.save(filename)
 
         # Clean up temporary files
@@ -312,6 +321,15 @@ class ExcelToolkit:
             dir_path = os.path.dirname(self.excel_path) or '.'
             filename = os.path.join(dir_path, filename)
         
+        # Fix for "I/O operation on closed file" error with images
+        # Remove all images from all sheets to avoid openpyxl image handling issues
+        try:
+            for sheet in workbook.worksheets:
+                if hasattr(sheet, '_images') and sheet._images:
+                    sheet._images = []
+        except Exception as e:
+            print(f"⚠️ Warning: Could not remove images: {e}")
+        
         workbook.save(filename)
         print(f"💾 Workbook saved to: {filename}")
         return filename
@@ -331,6 +349,8 @@ class ExcelToolkit:
                 {
                     'sheet': 'Sheet1',
                     'cell': 'B14',
+                    'row': 14,
+                    'column': 2,
                     'formula': '=SUM(B2:B12)',
                     'value': 550  # Calculated value
                 },
@@ -363,6 +383,8 @@ class ExcelToolkit:
                         formulas.append({
                             'sheet': sname,
                             'cell': cell.coordinate,
+                            'row': cell.row,
+                            'column': cell.column,
                             'formula': str(cell.value),
                             'value': calculated_value
                         })
@@ -692,6 +714,548 @@ class ExcelToolkit:
         else:
             return color
 
+    def detect_header_row(self, sheet_name: Optional[str] = None, 
+                         start_row: int = 1, end_row: Optional[int] = None,
+                         min_filled_cells: int = 3) -> Dict[str, Any]:
+        """
+        Detect the header row in a sheet based on multiple heuristics:
+        - High percentage of non-empty cells
+        - Cells with special formatting (bold, background color)
+        - Row followed by data rows with similar structure
+        
+        Args:
+            sheet_name: Name of sheet to analyze (None for active sheet)
+            start_row: First row to check (default: 1)
+            end_row: Last row to check (None for max_row)
+            min_filled_cells: Minimum filled cells to consider as header candidate
+        
+        Returns:
+            Dict with:
+            - 'header_row': Row number of detected header (None if not found)
+            - 'confidence': Confidence score (0-100)
+            - 'columns': List of header column names
+            - 'column_range': Tuple (start_col, end_col)
+        """
+        sheet = self.get_sheet(sheet_name)
+        end_row = end_row or min(sheet.max_row, 50)  # Check first 50 rows by default
+        
+        # First, detect summary keywords to exclude them from header detection
+        summary_keywords = [
+            'tổng', 'tổng cộng', 'cộng', 'tổng số', 'tổng kết', 'grand total',
+            'total', 'sum', 'subtotal', 'summary'
+        ]
+        
+        best_candidate = {'header_row': None, 'confidence': 0, 'columns': [], 'column_range': (1, 1)}
+        
+        for row_num in range(start_row, end_row + 1):
+            row = sheet[row_num]
+            
+            # Count filled cells
+            filled_cells = [cell for cell in row if cell.value is not None]
+            if len(filled_cells) < min_filled_cells:
+                continue
+            
+            # CRITICAL: Exclude rows that look like summary/total rows
+            # Check if first few cells contain summary keywords
+            is_summary_row = False
+            for cell in filled_cells[:5]:  # Check first 5 filled cells
+                if cell.value is not None:
+                    cell_str = str(cell.value).strip().lower()
+                    for keyword in summary_keywords:
+                        if keyword in cell_str:
+                            is_summary_row = True
+                            break
+                if is_summary_row:
+                    break
+            
+            if is_summary_row:
+                continue  # Skip this row, it's likely a summary row
+            
+            score = 0
+            
+            # Heuristic 1: High fill ratio (20 points)
+            fill_ratio = len(filled_cells) / len(row) if len(row) > 0 else 0
+            score += int(fill_ratio * 20)
+            
+            # Heuristic 2: Cells have bold font or background color (30 points)
+            formatted_cells = 0
+            for cell in filled_cells:
+                has_formatting = False
+                if cell.font and cell.font.bold:
+                    has_formatting = True
+                if cell.fill and cell.fill.fgColor and cell.fill.fgColor.rgb not in ['00000000', None]:
+                    has_formatting = True
+                if has_formatting:
+                    formatted_cells += 1
+            
+            if len(filled_cells) > 0:
+                format_ratio = formatted_cells / len(filled_cells)
+                score += int(format_ratio * 30)
+            
+            # Heuristic 3: Next few rows have data (40 points) - INCREASED WEIGHT
+            # Check that at least 2 rows below have data
+            data_rows_below = 0
+            for check_row in range(row_num + 1, min(row_num + 6, sheet.max_row + 1)):
+                check_cells = [cell.value for cell in sheet[check_row] if cell.value is not None]
+                if len(check_cells) >= min_filled_cells:
+                    data_rows_below += 1
+            
+            # More data rows below = higher confidence this is a header
+            if data_rows_below >= 2:
+                score += 40
+            elif data_rows_below == 1:
+                score += 20
+            
+            # Heuristic 4: Contains typical header words (10 points bonus)
+            header_keywords = ['mã', 'tên', 'name', 'id', 'stt', 'code', 'date', 'ngày', 
+                             'số', 'phòng', 'department', 'chức', 'position']
+            has_header_keywords = False
+            for cell in filled_cells[:10]:  # Check first 10 cells
+                if cell.value is not None:
+                    cell_str = str(cell.value).strip().lower()
+                    for kw in header_keywords:
+                        if kw in cell_str:
+                            has_header_keywords = True
+                            break
+                if has_header_keywords:
+                    break
+            
+            if has_header_keywords:
+                score += 10
+            
+            # Update best candidate
+            if score > best_candidate['confidence']:
+                columns = [cell.value for cell in filled_cells]
+                first_col = min(cell.column for cell in filled_cells)
+                last_col = max(cell.column for cell in filled_cells)
+                
+                best_candidate = {
+                    'header_row': row_num,
+                    'confidence': score,
+                    'columns': columns,
+                    'column_range': (first_col, last_col)
+                }
+        
+        print(f"🔍 [detect_header_row] Found header at row {best_candidate['header_row']} "
+              f"with {best_candidate['confidence']}% confidence")
+        return best_candidate
+
+    def detect_summary_rows(self, sheet_name: Optional[str] = None,
+                           keywords: Optional[List[str]] = None,
+                           start_row: Optional[int] = None,
+                           end_row: Optional[int] = None,
+                           header_row: Optional[int] = None,
+                           exclude_near_header: int = 3) -> List[Dict[str, Any]]:
+        """
+        Detect summary/total rows in a sheet based on keywords and formatting.
+        
+        Args:
+            sheet_name: Name of sheet to analyze
+            keywords: List of keywords indicating summary rows (default: common total keywords)
+            start_row: First row to check (None for row 1)
+            end_row: Last row to check (None for max_row)
+            header_row: Header row number (for excluding nearby rows that might be multi-line headers)
+            exclude_near_header: Number of rows after header to exclude (default: 3)
+        
+        Returns:
+            List of dicts with:
+            - 'row': Row number
+            - 'type': Type of summary ('total', 'subtotal', 'grand_total')
+            - 'keyword': Matched keyword
+            - 'first_cell_value': Value of first non-empty cell
+        """
+        # Default keywords for summary rows (support multiple languages)
+        if keywords is None:
+            keywords = [
+                # Vietnamese
+                'tổng', 'tổng cộng', 'cộng', 'tổng số', 'tổng kết', 'grand total',
+                # English
+                'total', 'sum', 'subtotal', 'grand total', 'summary',
+                # Other patterns
+                'total:', 'sum:', 'subtotal:', 'tổng:', 'cộng:'
+            ]
+        
+        sheet = self.get_sheet(sheet_name)
+        start_row = start_row or 1
+        end_row = end_row or sheet.max_row
+        
+        summary_rows = []
+        
+        for row_num in range(start_row, end_row + 1):
+            # CRITICAL FIX: Skip rows near header (likely multi-line headers)
+            # E.g., if header is row 3, skip rows 4-6 (within exclude_near_header distance)
+            if header_row is not None and exclude_near_header > 0:
+                if header_row < row_num <= header_row + exclude_near_header:
+                    continue  # Skip - too close to header, likely part of multi-line header
+            
+            row = sheet[row_num]
+            
+            # Check first few cells for keywords
+            for cell in row[:10]:  # Check first 10 cells
+                if cell.value is None:
+                    continue
+                
+                cell_str = str(cell.value).strip().lower()
+                
+                # IMPORTANT FIX: Skip cells with SUBTOTAL formulas in running count pattern
+                # Pattern: =IF(condition, "", SUBTOTAL(...)) or similar - these are data rows, not summary rows
+                if cell.data_type == 'f':  # Is a formula
+                    # Check if it's a running count pattern (SUBTOTAL with relative range)
+                    if 'subtotal' in cell_str and '=if' in cell_str:
+                        continue  # Skip this cell - it's a running count formula
+                    # Also skip standalone SUBTOTAL formulas with single-row or expanding range
+                    # e.g., =SUBTOTAL(3,$B$5:B5) where end row matches current row
+                    if 'subtotal' in cell_str and f':b{row_num}' in cell_str.replace('$', '').replace(' ', ''):
+                        continue  # Skip - running subtotal
+                
+                # Check if any keyword matches
+                for keyword in keywords:
+                    if keyword.lower() in cell_str:
+                        # Additional check: If this is a formula but doesn't look like a summary formula, skip
+                        if cell.data_type == 'f':
+                            # Only accept formulas that look like summary (SUM, AVERAGE, etc., but not SUBTOTAL)
+                            if 'subtotal' in cell_str.lower():
+                                continue  # Skip SUBTOTAL formulas entirely
+                            
+                            # Check if it's a horizontal formula (same row) vs vertical (cross rows)
+                            # E.g., =SUM(G7:H7) is horizontal (data row), =SUM(G5:G17) is vertical (summary row)
+                            import re
+                            # Match range patterns like G7:H7, $G$5:$H$17, etc.
+                            range_pattern = r'([a-z]+)(\d+):([a-z]+)(\d+)'
+                            matches = re.findall(range_pattern, cell_str)
+                            if matches:
+                                is_horizontal = False
+                                for match in matches:
+                                    start_col, start_row, end_col, end_row = match
+                                    start_row_num = int(start_row)
+                                    end_row_num = int(end_row)
+                                    # If start and end rows are the same, it's horizontal
+                                    if start_row_num == end_row_num == row_num:
+                                        is_horizontal = True
+                                        break
+                                if is_horizontal:
+                                    continue  # Skip horizontal formulas - they're data rows, not summary
+                            
+                            # Accept SUM, AVERAGE, COUNT formulas (but only vertical ones)
+                            summary_formula_indicators = ['sum(', 'average(', 'count(', 'sumif(', 'countif(']
+                            if not any(indicator in cell_str for indicator in summary_formula_indicators):
+                                continue  # Not a summary formula
+                        
+                        # Determine type based on keyword
+                        summary_type = 'total'
+                        if any(word in keyword.lower() for word in ['grand', 'tổng cộng', 'tổng kết']):
+                            summary_type = 'grand_total'
+                        elif 'subtotal' in keyword.lower():
+                            summary_type = 'subtotal'
+                        
+                        # Get first non-empty cell value
+                        first_value = None
+                        for c in row:
+                            if c.value is not None:
+                                first_value = c.value
+                                break
+                        
+                        summary_rows.append({
+                            'row': row_num,
+                            'type': summary_type,
+                            'keyword': keyword,
+                            'first_cell_value': first_value
+                        })
+                        break  # Found keyword, move to next row
+                
+                if len(summary_rows) > 0 and summary_rows[-1]['row'] == row_num:
+                    break  # Already found keyword in this row
+        
+        print(f"🔍 [detect_summary_rows] Found {len(summary_rows)} summary row(s)")
+        for sr in summary_rows:
+            print(f"   - Row {sr['row']}: {sr['type']} (keyword: '{sr['keyword']}')")
+        
+        return summary_rows
+
+    def detect_data_boundaries(self, sheet_name: Optional[str] = None,
+                              header_row: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Detect the boundaries of data region in a sheet.
+        
+        Args:
+            sheet_name: Name of sheet to analyze
+            header_row: Known header row (if None, will auto-detect)
+        
+        Returns:
+            Dict with:
+            - 'header_row': Header row number
+            - 'data_start_row': First data row (after header)
+            - 'data_end_row': Last data row (before summary or empty rows)
+            - 'summary_rows': List of summary row numbers
+            - 'safe_insertion_row': Recommended row for inserting new data
+        """
+        sheet = self.get_sheet(sheet_name)
+        
+        # Auto-detect header if not provided
+        if header_row is None:
+            header_info = self.detect_header_row(sheet_name)
+            header_row = header_info['header_row']
+            if header_row is None:
+                print("⚠️ [detect_data_boundaries] Could not detect header row, assuming row 1")
+                header_row = 1
+        
+        # Detect summary rows (pass header_row to exclude nearby rows)
+        summary_info = self.detect_summary_rows(sheet_name, start_row=header_row + 1, header_row=header_row)
+        summary_rows = [s['row'] for s in summary_info]
+        
+        # Data starts right after header
+        data_start_row = header_row + 1
+        
+        # Find data end row (before first summary row or where data becomes sparse)
+        data_end_row = sheet.max_row
+        
+        # If there are summary rows, data ends before the first summary
+        if summary_rows:
+            data_end_row = min(summary_rows) - 1
+        else:
+            # Check for empty rows that might indicate end of data
+            consecutive_empty = 0
+            for row_num in range(data_start_row, sheet.max_row + 1):
+                row_values = [cell.value for cell in sheet[row_num] if cell.value is not None]
+                if len(row_values) == 0:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 3:  # 3 consecutive empty rows = end of data
+                        data_end_row = row_num - 3
+                        break
+                else:
+                    consecutive_empty = 0
+        
+        # Safe insertion point: right after last data row (before summary)
+        safe_insertion_row = data_end_row + 1
+        
+        result = {
+            'header_row': header_row,
+            'data_start_row': data_start_row,
+            'data_end_row': data_end_row,
+            'summary_rows': summary_rows,
+            'safe_insertion_row': safe_insertion_row
+        }
+        
+        print(f"📊 [detect_data_boundaries] Sheet: {sheet_name or 'Active'}")
+        print(f"   - Header row: {header_row}")
+        print(f"   - Data range: rows {data_start_row} to {data_end_row}")
+        print(f"   - Summary rows: {summary_rows if summary_rows else 'None'}")
+        print(f"   - Safe insertion point: row {safe_insertion_row}")
+        
+        return result
+
+    def analyze_column_types(self, sheet_name: Optional[str] = None,
+                            boundaries: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Analyze columns to determine which are INPUT columns (need data) vs FORMULA columns (auto-calculated).
+        
+        Args:
+            sheet_name: Name of sheet to analyze
+            boundaries: Pre-computed boundaries (if None, will auto-detect)
+        
+        Returns:
+            Dict with:
+            - 'input_columns': List of dicts for columns needing input data
+              [{'col': 2, 'col_letter': 'B', 'header': 'Mã nhân viên', 'sample_values': [...], 
+                'data_type': 'text', 'sample_range': (min, max)}]
+            - 'formula_columns': List of dicts for columns with formulas
+              [{'col': 10, 'col_letter': 'J', 'header': 'Tổng lương', 'formulas': [...]}]
+            - 'empty_columns': List of column numbers that are completely empty
+        """
+        from openpyxl import load_workbook
+        from datetime import datetime
+        
+        sheet = self.get_sheet(sheet_name)
+        
+        # Get boundaries if not provided
+        if boundaries is None:
+            boundaries = self.detect_data_boundaries(sheet_name)
+        
+        header_row = boundaries['header_row']
+        data_start = boundaries['data_start_row']
+        data_end = boundaries['data_end_row']
+        
+        # Load workbook with formulas (data_only=False) to detect formula cells
+        wb_with_formulas = load_workbook(self.excel_path, data_only=False)
+        sheet_with_formulas = wb_with_formulas[sheet.title] if sheet_name else wb_with_formulas.active
+        
+        input_columns = []
+        formula_columns = []
+        empty_columns = []
+        
+        # Get header row to know column range
+        header_cells = [cell for cell in sheet[header_row] if cell.value is not None]
+        if not header_cells:
+            print("⚠️ [analyze_column_types] No header cells found")
+            return {'input_columns': [], 'formula_columns': [], 'empty_columns': []}
+        
+        start_col = min(cell.column for cell in header_cells)
+        end_col = max(cell.column for cell in header_cells)
+        
+        print(f"🔬 [analyze_column_types] Analyzing columns {start_col} to {end_col}")
+        
+        for col_num in range(start_col, end_col + 1):
+            col_letter = get_column_letter(col_num)
+            header_cell = sheet.cell(header_row, col_num)
+            header_value = header_cell.value if header_cell.value else f"Col_{col_letter}"
+            
+            # Check cells in data range
+            has_formula = False
+            has_value = False
+            formulas_found = []
+            sample_values = []
+            
+            for row_num in range(data_start, min(data_end + 1, data_start + 10)):  # Check first 10 data rows
+                # Check for formula in formula-enabled workbook
+                cell_with_formula = sheet_with_formulas.cell(row_num, col_num)
+                if cell_with_formula.data_type == 'f' and cell_with_formula.value:
+                    has_formula = True
+                    formulas_found.append({
+                        'row': row_num,
+                        'formula': str(cell_with_formula.value)
+                    })
+                
+                # Check for value in regular workbook
+                cell_value = sheet.cell(row_num, col_num).value
+                if cell_value is not None:
+                    has_value = True
+                    if len(sample_values) < 5:  # Keep 5 sample values
+                        sample_values.append(cell_value)
+            
+            # Categorize column
+            if has_formula:
+                formula_columns.append({
+                    'col': col_num,
+                    'col_letter': col_letter,
+                    'header': header_value,
+                    'formulas': formulas_found[:3]  # Keep first 3 formulas as examples
+                })
+            elif has_value:
+                # Infer data type from samples
+                data_type = 'text'
+                sample_range = None
+                
+                if sample_values:
+                    first_sample = sample_values[0]
+                    if isinstance(first_sample, (int, float)):
+                        data_type = 'number'
+                        numeric_values = [v for v in sample_values if isinstance(v, (int, float))]
+                        if numeric_values:
+                            sample_range = (min(numeric_values), max(numeric_values))
+                    elif isinstance(first_sample, datetime):
+                        data_type = 'date'
+                    elif isinstance(first_sample, bool):
+                        data_type = 'boolean'
+                
+                input_columns.append({
+                    'col': col_num,
+                    'col_letter': col_letter,
+                    'header': header_value,
+                    'sample_values': sample_values,
+                    'data_type': data_type,
+                    'sample_range': sample_range
+                })
+            else:
+                # Check if this column might still need input by looking at summary rows
+                has_summary_value = False
+                for summary_row in boundaries.get('summary_rows', []):
+                    if sheet.cell(summary_row, col_num).value is not None:
+                        has_summary_value = True
+                        break
+                
+                if has_summary_value:
+                    # This column likely needs input (it has summary totals)
+                    input_columns.append({
+                        'col': col_num,
+                        'col_letter': col_letter,
+                        'header': header_value,
+                        'sample_values': [],
+                        'data_type': 'number',  # Assume number if in summary
+                        'sample_range': None,
+                        'note': 'Has values in summary rows, likely needs input'
+                    })
+                else:
+                    empty_columns.append(col_num)
+        
+        wb_with_formulas.close()
+        
+        print(f"📊 [analyze_column_types] Results:")
+        print(f"   - Input columns: {len(input_columns)}")
+        print(f"   - Formula columns: {len(formula_columns)}")
+        print(f"   - Empty columns: {len(empty_columns)}")
+        
+        return {
+            'input_columns': input_columns,
+            'formula_columns': formula_columns,
+            'empty_columns': empty_columns
+        }
+
+    def copy_row_formulas(self, sheet_name: str, template_row: int, 
+                         target_rows: List[int], 
+                         formula_columns: Optional[List[Dict[str, Any]]] = None) -> str:
+        """
+        Copy formulas from a template row to target rows.
+        Automatically adjusts cell references.
+        
+        Args:
+            sheet_name: Name of sheet
+            template_row: Row number to copy formulas from
+            target_rows: List of row numbers to copy formulas to
+            formula_columns: List of column info from analyze_column_types() 
+                           (if None, will detect formulas automatically)
+        
+        Returns:
+            Status message
+        """
+        try:
+            from openpyxl import load_workbook
+            
+            sheet = self.get_sheet(sheet_name)
+            
+            # If formula_columns not provided, detect them
+            if formula_columns is None:
+                # Load with formulas to detect which cells have formulas
+                wb_formulas = load_workbook(self.excel_path, data_only=False) 
+                sheet_formulas = wb_formulas[sheet.title]
+                
+                formula_cols = []
+                for cell in sheet_formulas[template_row]:
+                    if cell.data_type == 'f' and cell.value:
+                        formula_cols.append(cell.column)
+                
+                wb_formulas.close()
+            else:
+                formula_cols = [col_info['col'] for col_info in formula_columns]
+            
+            if not formula_cols:
+                return "⚠️ No formulas found in template row"
+            
+            # Copy formulas to each target row
+            formulas_copied = 0
+            for target_row in target_rows:
+                for col_num in formula_cols:
+                    template_cell = sheet.cell(template_row, col_num)
+                    target_cell = sheet.cell(target_row, col_num)
+                    
+                    # Copy formula if it exists
+                    if template_cell.data_type == 'f' and template_cell.value:
+                        # Simply assign the formula - openpyxl will auto-adjust references
+                        target_cell.value = template_cell.value
+                        formulas_copied += 1
+                    # Copy value if no formula but has value
+                    elif template_cell.value is not None:
+                        target_cell.value = template_cell.value
+                        formulas_copied += 1
+            
+            message = f"✅ Copied {formulas_copied} formulas from row {template_row} to {len(target_rows)} rows"
+            print(message)
+            return message
+            
+        except Exception as e:
+            error_msg = f"❌ Error copying formulas: {str(e)}"
+            print(error_msg)
+            raise Exception(error_msg)
+
     def get_helper_functions_dict(self) -> Dict:
         """Return a dictionary of helper functions for code execution environments."""
         return {
@@ -705,7 +1269,13 @@ class ExcelToolkit:
             'create_new_workbook': self.create_new_workbook,
             'save_workbook_as': self.save_workbook_as,
             'get_all_formulas': self.get_all_formulas,
-            #additional editing tools
+            # Data structure analysis functions
+            'detect_header_row': self.detect_header_row,
+            'detect_summary_rows': self.detect_summary_rows,
+            'detect_data_boundaries': self.detect_data_boundaries,
+            'analyze_column_types': self.analyze_column_types,
+            'copy_row_formulas': self.copy_row_formulas,
+            # Additional editing tools
             'insert_rows': self.insert_rows,
             'insert_columns': self.insert_columns,
             'delete_rows': self.delete_rows,

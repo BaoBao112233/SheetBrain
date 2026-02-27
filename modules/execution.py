@@ -60,6 +60,130 @@ You have access to a Python environment with the following pre-loaded:
 - The current workbook is already loaded as 'workbook' variable
 - numpy (as `np`) and pandas (as `pd`) are available
 
+**🔥 COMPLETE EXAMPLE - Generating Fake Data (COPY THIS PATTERN):**
+```python
+import random
+from datetime import datetime, timedelta
+
+# Step 1: Analyze structure FIRST
+boundaries = detect_data_boundaries()  # Find header, data region, summary rows
+col_types = analyze_column_types()     # Identify INPUT vs FORMULA columns
+
+# Step 2: Insert rows at SAFE position (before summary rows)
+num_new_rows = 10
+insert_rows(None, boundaries['safe_insertion_row'], num_new_rows)
+
+# Step 3: Generate data for ALL input columns using CORRECT data types
+for i in range(num_new_rows):
+    row_num = boundaries['safe_insertion_row'] + i
+    
+    for col_info in col_types['input_columns']:
+        col_letter = col_info['col_letter']
+        data_type = col_info.get('data_type', 'text')  # ← CRITICAL: use this!
+        sample_values = col_info.get('sample_values', [])
+        sample_range = col_info.get('sample_range')
+        
+        # Generate based on data_type (NOT header keywords!)
+        if data_type == 'number':
+            if sample_range:
+                min_val, max_val = sample_range
+                value = random.randint(int(min_val), int(max_val))
+            else:
+                value = random.randint(1000000, 20000000)
+        
+        elif data_type == 'date':
+            days_ago = random.randint(30, 365)
+            value = datetime.now() - timedelta(days=days_ago)
+        
+        elif data_type == 'boolean':
+            value = random.choice([True, False])
+        
+        else:  # text
+            # ⚠️ CRITICAL: Generate REALISTIC text, NEVER use placeholders like "Dữ liệu mới X"!
+            header = col_info.get('header', '').lower()
+            
+            # First, try to use sample values if available
+            if sample_values and len(sample_values) > 0:
+                # Pick a random sample and modify it slightly
+                base_sample = random.choice(sample_values)
+                # For names, generate variations
+                if any(keyword in header for keyword in ['họ', 'tên', 'name']):
+                    first_names = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Võ']
+                    last_names = ['Văn', 'Thị', 'Đức', 'Minh', 'Hải', 'Thu']
+                    names = ['Anh', 'Bình', 'Cường', 'Dũng', 'Hà', 'Linh', 'Mai', 'Nam']
+                    value = f"{{random.choice(first_names)}} {{random.choice(last_names)}} {{random.choice(names)}}"
+                # For positions/titles
+                elif any(keyword in header for keyword in ['chức', 'vị trí', 'position', 'title']):
+                    positions = ['Nhân viên', 'Chuyên viên', 'Kỹ sư', 'Trưởng phòng', 'Phó phòng', 
+                                'Giám đốc', 'Phó giám đốc', 'Trưởng bộ phận', 'Chuyên gia']
+                    depts = ['Kỹ thuật', 'R&D', 'Kinh doanh', 'Hành chính', 'Nhân sự']
+                    value = f"{{random.choice(positions)}} {{random.choice(depts)}}"
+                # For departments
+                elif any(keyword in header for keyword in ['phòng', 'ban', 'bộ phận', 'department']):
+                    departments = ['Kỹ thuật', 'Kinh doanh', 'Hành chính', 'Nhân sự', 'Kế toán', 
+                                  'R&D', 'BOD', 'Sản xuất', 'CNTT', 'Marketing']
+                    value = random.choice(departments)
+                # For gender
+                elif any(keyword in header for keyword in ['giới tính', 'gender', 'sex']):
+                    value = random.choice(['Nam', 'Nữ'])
+                # For addresses
+                elif any(keyword in header for keyword in ['địa chỉ', 'address', 'đường']):
+                    streets = ['Nguyễn Trãi', 'Lê Lợi', 'Trần Hưng Đạo', 'Hai Bà Trưng']
+                    districts = ['Quận 1', 'Quận 3', 'Quận 5', 'Quận Tân Bình']
+                    cities = ['TP.HCM', 'Hà Nội', 'Đà Nẵng']
+                    value = f"{{random.randint(1,500)}} {{random.choice(streets)}}, {{random.choice(districts)}}, {{random.choice(cities)}}"
+                # For employee codes
+                elif any(keyword in header for keyword in ['mã', 'code', 'id']) and 'nhân viên' in header:
+                    value = f"NV-{{random.randint(100, 999)}}"
+                # Generic text based on sample
+                else:
+                    # Try to mimic sample format
+                    if isinstance(base_sample, str) and len(base_sample) > 0:
+                        # If sample is short (< 20 chars), generate similar length text
+                        if len(base_sample) < 20:
+                            value = f"Sample_{{random.randint(1, 100)}}"
+                        else:
+                            value = base_sample[:10] + f"_{{i+1}}"
+                    else:
+                        value = f"Text_{{i+1}}"
+            else:
+                # No samples available, generate based on header keywords only
+                if any(keyword in header for keyword in ['họ', 'tên', 'name']):
+                    first = ['Nguyễn', 'Trần', 'Lê'][random.randint(0, 2)]
+                    last = ['Văn', 'Thị', 'Đức'][random.randint(0, 2)]
+                    name = ['Anh', 'Bình', 'Linh'][random.randint(0, 2)]
+                    value = f"{{first}} {{last}} {{name}}"
+                elif any(keyword in header for keyword in ['chức', 'position']):
+                    value = random.choice(['Nhân viên', 'Kỹ sư', 'Chuyên viên'])
+                elif any(keyword in header for keyword in ['phòng', 'department']):
+                    value = random.choice(['Kỹ thuật', 'Kinh doanh', 'Hành chính'])
+                elif any(keyword in header for keyword in ['mã', 'code']):
+                    value = f"CODE-{{random.randint(100, 999)}}"
+                else:
+                    value = f"Text_{{i+1}}"
+        
+        set_cell_value(None, f"{{col_letter}}{{row_num}}", value)
+
+# Step 4: Copy ALL formulas in ONE call
+template_row = boundaries['data_start_row']  # First data row
+target_rows = list(range(boundaries['safe_insertion_row'], 
+                        boundaries['safe_insertion_row'] + num_new_rows))
+copy_row_formulas(None, template_row, target_rows, col_types['formula_columns'])
+
+# Step 5: Save the MODIFIED workbook (NOT create_new_workbook!)
+save_workbook_as(workbook, 'output_filename.xlsx')
+```
+
+**⚠️ CRITICAL - Don't make this mistake:**
+```python
+# ❌ WRONG - Creates empty workbook!
+new_wb = create_new_workbook()  
+save_workbook_as(new_wb, 'output.xlsx')  # Saves EMPTY file!
+
+# ✅ CORRECT - Saves modified workbook
+save_workbook_as(workbook, 'output.xlsx')  # Saves your changes!
+```
+
 Available Excel Helper Functions:
 - `get_sheet(sheet_name=None)`: Get worksheet by name or active sheet
   - **Usage:** `sheet = get_sheet("Sheet1")` or `sheet = get_sheet()` for active sheet
@@ -101,14 +225,19 @@ Available Excel Helper Functions:
 - `save_workbook()`: Save current workbook to file with '_output' postfix
   - **Usage:** `filename = save_workbook()`
   - **Output:** Returns saved filename string: `"/path/to/original_output.xlsx"` and prints confirmation message
+  - **⚠️ IMPORTANT**: This saves the CURRENT workbook (the one already loaded as 'workbook' variable)
 
-- `create_new_workbook()`: Create a new empty Excel workbook
+- `create_new_workbook()`: Create a new EMPTY Excel workbook FROM SCRATCH
   - **Usage:** `new_wb = create_new_workbook()`
   - **Output:** Returns openpyxl.Workbook object that you can work with
-  - **Example:** Create new workbook, add data, then save with `save_workbook_as(new_wb, "myfile.xlsx")`
+  - **⚠️ CRITICAL WARNING**: Only use this when creating a BRAND NEW file (not modifying existing data)!
+  - **Example use case**: Extracting formulas to a NEW report file
+  - **❌ NEVER use this for**: Modifying existing data, adding rows, generating fake data
 
 - `save_workbook_as(workbook, filename)`: Save any workbook with custom filename
-  - **Usage:** `path = save_workbook_as(new_wb, "formula.xlsx")` or `save_workbook_as(workbook, "/absolute/path/file.xlsx")`
+  - **Usage:** `save_workbook_as(workbook, "output.xlsx")` - saves the CURRENT workbook
+  - **CRITICAL**: When modifying existing data, use `workbook` (not create_new_workbook()!)
+  - **Example**: `save_workbook_as(workbook, "test_RDU_Salary_Updated.xlsx")`
   - **Parameters:** 
     - `workbook`: Workbook instance to save (can be the loaded 'workbook' or a new one from `create_new_workbook()`)
     - `filename`: Output filename - use relative path (e.g., "output.xlsx") or absolute path
@@ -119,14 +248,192 @@ Available Excel Helper Functions:
   - **Important:** This function re-loads the workbook to access formulas (main workbook is loaded with data_only=True)
   - **Parameters:** `sheet_name` - specific sheet or None for all sheets
   - **Output:** List of dicts: `[{{'sheet': 'Sheet1', 'cell': 'B14', 'formula': '=SUM(B2:B12)', 'value': 550}}, ...]`
-  - **CRITICAL for Natural Language Conversion:**
-    1. **Parse the formula** to extract ranges (e.g., B2:B13 from =SUM(B2:B13))
-    2. **Read column header** from row 1 to understand what the column represents (e.g., "Doanh thu" = Revenue)
-    3. **Read field name/label** from column A at the SAME ROW as the formula cell (e.g., A14 = "Tổng")
-    4. **Use sheet name** as context (e.g., sheet "Năm 2021" indicates year 2021)
-    5. **Read row context** from column A for range cells to understand what they represent (e.g., months, products)
-    6. **Combine all context** to create meaningful descriptions: "Tổng doanh thu năm 2021" instead of "Tổng từ 1 đến 12"
-    7. **Handle sheet references** (e.g., ='Sheet1'!B14) by describing the reference clearly
+
+**DATA STRUCTURE ANALYSIS FUNCTIONS - CRITICAL FOR SMART DATA MANIPULATION:**
+
+- `detect_header_row(sheet_name=None, start_row=1, end_row=None, min_filled_cells=3)`: Automatically detect header row
+  - **Purpose:** Find the row containing column headers (NOT always row 1!)
+  - **Usage:** `header_info = detect_header_row("Sheet1")`
+  - **Output:** Dict with `{{'header_row': 12, 'confidence': 85, 'columns': ['Mã nhân viên', 'Họ và tên', ...], 'column_range': (1, 20)}}`
+  - **Detection heuristics:**
+    - High percentage of filled cells
+    - Cells with special formatting (bold, background color)
+    - Followed by data rows with similar structure
+  - **WHEN TO USE:** Before inserting/reading data, to locate actual column headers
+
+- `detect_summary_rows(sheet_name=None, keywords=None, start_row=None, end_row=None)`: Find summary/total rows
+  - **Purpose:** Detect rows containing totals, subtotals, summaries (keywords: "TỔNG", "TOTAL", "SUM", etc.)
+  - **Usage:** `summary_rows = detect_summary_rows("Sheet1")`
+  - **Output:** List of dicts: `[{{'row': 15, 'type': 'total', 'keyword': 'tổng cộng', 'first_cell_value': 'TỔNG CỘNG'}}, ...]`
+  - **Supported keywords:** Vietnamese (tổng, tổng cộng, cộng), English (total, sum, subtotal, grand total)
+  - **WHEN TO USE:** Before inserting data, to avoid overwriting summary rows
+
+- `detect_data_boundaries(sheet_name=None, header_row=None)`: Comprehensive data region analysis
+  - **Purpose:** Detect complete data structure including header, data range, and safe insertion point
+  - **Usage:** `boundaries = detect_data_boundaries("Sheet1")`
+  - **Output:** Dict with:
+    ```
+    {{
+      'header_row': 12,              # Where column headers are
+      'data_start_row': 13,          # First data row (after header)
+      'data_end_row': 14,            # Last data row (before summary)
+      'summary_rows': [15, 28],      # Rows containing totals/summaries
+      'safe_insertion_row': 15       # WHERE TO INSERT NEW DATA (before summaries)
+    }}
+    ```
+  - **CRITICAL USE CASES:**
+    - **Inserting new data rows:** Use `safe_insertion_row` to insert BEFORE summary rows
+    - **Reading data:** Use `data_start_row` to `data_end_row` to read only actual data
+    - **Preserving structure:** Avoid modifying `header_row` and `summary_rows`
+  - **Example - Insert 10 new rows:**
+    ```python
+    boundaries = detect_data_boundaries("Sheet1")
+    # Insert at safe_insertion_row (pushes summary rows down)
+    insert_rows("Sheet1", boundaries['safe_insertion_row'], 10)
+    # Now fill the new rows with data
+    for i in range(10):
+        row_num = boundaries['safe_insertion_row'] + i
+        set_cell_value("Sheet1", f"A{{row_num}}", f"New data {{i+1}}")
+    ```
+
+**CRITICAL WORKFLOW for Data Insertion/Manipulation:**
+1. **ALWAYS call `detect_data_boundaries()` FIRST** before inserting/modifying data
+2. **MANDATORY: Call `analyze_column_types()` to identify INPUT vs FORMULA columns**
+3. **Use `data_type` field to generate CORRECT data types** (not just guessing from header!)
+   - `data_type='number'` → generate int/float using `sample_range`
+   - `data_type='date'` → generate datetime objects
+   - `data_type='boolean'` → generate True/False
+   - `data_type='text'` → generate meaningful strings (names, codes, etc.)
+4. **FILL ALL `input_columns`** with appropriate data (use `sample_values` and `sample_range` as reference)
+5. **Use `copy_row_formulas()` to copy ALL formulas in ONE call** (don't manually copy each formula!)
+6. Use `safe_insertion_row` to insert new rows (preserves summaries)
+7. **Call `save_workbook()` to save - formulas will be preserved!**
+
+**⚠️ COMMON MISTAKES TO AVOID:**
+- ❌ DON'T ignore `data_type` - always use it to determine what type of value to generate
+- ❌ DON'T generate "Dữ liệu mới X" for numeric columns - use actual numbers!
+- ❌ DON'T manually copy formulas cell-by-cell - use `copy_row_formulas()` instead
+- ❌ DON'T skip columns in `input_columns` - they ALL need data even if empty in template
+- ❌ DON'T manually fill `formula_columns` - always copy formulas instead
+
+- `analyze_column_types(sheet_name=None, boundaries=None)`: Identify INPUT vs FORMULA columns
+  - **Purpose:** Determine which columns need data input vs which have auto-calculated formulas
+  - **Usage:** `col_types = analyze_column_types("Sheet1")`
+  - **Output:** Dict with:
+    ```
+    {{
+      'input_columns': [
+        {{'col': 2, 'col_letter': 'B', 'header': 'Mã nhân viên', 'sample_values': ['RDU-072', 'RDU-101']}},
+        {{'col': 3, 'col_letter': 'C', 'header': 'Họ và tên', 'sample_values': ['Nguyễn Văn A']}},
+        {{'col': 12, 'col_letter': 'L', 'header': 'Lương cơ bản', 'sample_values': [5592000, 11688000]}}
+      ],
+      'formula_columns': [
+        {{'col': 15, 'col_letter': 'O', 'header': 'Tổng lương', 'formulas': [{{'row': 13, 'formula': '=L13+M13+N13'}}]}}
+      ],
+      'empty_columns': [20, 21]
+    }}
+    ```
+  - **CRITICAL USE CASES:**
+    - **Generating fake data:** Generate values for ALL columns in `input_columns` using CORRECT data types
+    - **Preserving formulas:** Use `copy_row_formulas()` to copy formulas from template row
+    - **Understanding data types:** Use `data_type` and `sample_range` from column analysis
+  
+- `copy_row_formulas(sheet_name, template_row, target_rows, formula_columns=None)`: Copy formulas from template to new rows
+  - **Purpose:** Automatically copy all formulas from a template row to new rows with adjusted references
+  - **Usage:** `result = copy_row_formulas("Sheet1", 13, [15, 16, 17], col_types['formula_columns'])`
+  - **Parameters:**
+    - `template_row`: Row number to copy formulas from (typically first data row)
+    - `target_rows`: List of row numbers to copy to (new rows)
+    - `formula_columns`: List from analyze_column_types() (optional, will auto-detect if None)
+  - **Output:** String message confirming how many formulas were copied
+  - **CRITICAL:** This preserves formulas with auto-adjusted cell references (e.g., =A13+B13 becomes =A15+B15)
+
+  - **Example - Generate complete fake data with CORRECT data types:**
+    ```python
+    import random
+    from datetime import datetime, timedelta
+    
+    # Step 1: Analyze structure
+    boundaries = detect_data_boundaries("Sheet1")
+    col_types = analyze_column_types("Sheet1", boundaries)
+    
+    # Step 2: Insert rows at safe position
+    num_rows = 10
+    insert_rows("Sheet1", boundaries['safe_insertion_row'], num_rows)
+    
+    # Step 3: Generate data for ALL input columns with CORRECT data types
+    for i in range(num_rows):
+        row_num = boundaries['safe_insertion_row'] + i
+        
+        for col_info in col_types['input_columns']:
+            col_letter = col_info['col_letter']
+            header = col_info['header']
+            data_type = col_info.get('data_type', 'text')
+            sample_range = col_info.get('sample_range')
+            samples = col_info.get('sample_values', [])
+            
+            # CRITICAL: Generate value based on data_type (not just header keywords)
+            if data_type == 'number':
+                # For numeric columns, use sample_range or samples
+                if sample_range:
+                    min_val, max_val = sample_range
+                    # Generate within 80%-120% of sample range
+                    value = random.randint(int(min_val * 0.8), int(max_val * 1.2))
+                elif samples:
+                    # Use samples as reference
+                    avg = sum(samples) / len(samples)
+                    value = int(avg * random.uniform(0.5, 1.5))
+                else:
+                    # Guess based on header
+                    if 'lương' in header.lower() or 'salary' in header.lower():
+                        value = random.randint(5000000, 20000000)
+                    else:
+                        value = random.randint(1, 100)
+            
+            elif data_type == 'date':
+                # For date columns
+                if samples:
+                    # Generate date near sample dates
+                    ref_date = samples[0]
+                    days_offset = random.randint(-30, 30)
+                    value = ref_date + timedelta(days=days_offset)
+                else:
+                    # Random recent date
+                    days_ago = random.randint(0, 365)
+                    value = datetime.now() - timedelta(days=days_ago)
+            
+            elif data_type == 'boolean':
+                value = random.choice([True, False])
+            
+            else:  # text
+                # Generate text based on header meaning
+                if 'mã' in header.lower() or 'code' in header.lower():
+                    value = f"RDU-{{random.randint(200, 999)}}"
+                elif 'tên' in header.lower() or 'name' in header.lower():
+                    first_names = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Vũ', 'Võ', 'Đặng']
+                    middle_names = ['Văn', 'Thị', 'Minh', 'Đức', 'Hữu', 'Công', 'Kim']
+                    last_names = ['An', 'Bình', 'Cường', 'Dũng', 'Hà', 'Linh', 'Mai', 'Nam']
+                    value = f"{{random.choice(first_names)}} {{random.choice(middle_names)}} {{random.choice(last_names)}}"
+                elif 'email' in header.lower():
+                    value = f"user{{i+1}}@company.com"
+                elif samples:
+                    # Use one of the samples as template
+                    value = random.choice(samples)
+                else:
+                    # Fallback - but this should rarely happen with good column analysis
+                    value = f"Data {{i+1}}"
+            
+            set_cell_value("Sheet1", f"{{col_letter}}{{row_num}}", value)
+    
+    # Step 4: Copy ALL formulas from template row to new rows (ONE LINE!)
+    if boundaries['data_end_row'] >= boundaries['data_start_row']:
+        template_row = boundaries['data_start_row']
+        new_rows = [boundaries['safe_insertion_row'] + i for i in range(num_rows)]
+        copy_row_formulas("Sheet1", template_row, new_rows, col_types['formula_columns'])
+    
+    # Step 5: Save workbook
+    save_workbook()  # This preserves formulas!
+    ```
   - **Example - Convert formulas to natural language:**
     ```python
     import re
@@ -338,7 +645,7 @@ Please start by exploring the data structure and then work toward answering the 
                 self.conversation_history.append(response_message)
 
                 # Parse response for code action or final answer
-                thought, code_action = self._parse_llm_response(response_message.content)
+                thought, code_action = self._parse_llm_response(response_message["content"])
 
                 if code_action is None:
                     # No code to execute, check if it's a final answer
@@ -471,7 +778,7 @@ Please start by exploring the data structure and then work toward answering the 
                 if lines:
                     last_line = lines[-1].strip()
                     if last_line and not any(last_line.startswith(kw) for kw in
-                                           ['import ', 'from ', 'def ', 'class ', 'if ', 'for ', 'while ', 'try ', 'with ', 'print(']):
+                                           ['import ', 'from ', 'def ', 'class ', 'if ', 'for ', 'while ', 'try ', 'with ', '# print(']):
                         try:
                             last_result = eval(last_line, combined_namespace)
                             if last_result is not None:
@@ -518,17 +825,17 @@ Please start by exploring the data structure and then work toward answering the 
                 
                 response = self.llm.invoke(langchain_messages)
 
-                print("="*50)
-                print("EXECUTION MODULE LLM RESPONSE:")
-                print("="*50)
-                print(response.content)
-                print("="*50)
+                # print("="*50)
+                # print("EXECUTION MODULE LLM RESPONSE:")
+                # print("="*50)
+                # print(response.content)
+                # print("="*50)
                 
                 # Sleep to respect rate limit
                 time.sleep(self.api_rate_limit_delay)
                 
-                # Return a dict-like object compatible with existing code
-                return type('Message', (), {'content': response.content, 'role': 'assistant'})()
+                # Return dict format for compatibility with existing code
+                return {"role": "assistant", "content": response.content}
 
             except Exception as e:
                 last_exception = e

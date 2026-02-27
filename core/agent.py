@@ -124,8 +124,8 @@ class SheetBrain:
         enable_understanding = enable_understanding if enable_understanding is not None else self.config.enable_understanding
 
         logger.info("Starting iterative three-stage analysis")
-        print("🚀 [SheetBrain] Starting iterative three-stage analysis...")
-        print("="*80)
+        # print("🚀 [SheetBrain] Starting iterative three-stage analysis...")
+        # print("="*80)
 
         overall_start_time = time.time()
         all_execution_results = []
@@ -135,31 +135,31 @@ class SheetBrain:
             # ===== STAGE 1: UNDERSTANDING (Optional) =====
             if enable_understanding:
                 logger.info("Running understanding module")
-                print("📖 [STAGE 1] UNDERSTANDING MODULE")
-                print("-" * 40)
+                # print("📖 [STAGE 1] UNDERSTANDING MODULE")
+                # print("-" * 40)
                 understanding_start_time = time.time()
 
                 understanding_output = self.understanding_module.analyze(user_question, table_image)
                 understanding_duration = time.time() - understanding_start_time
 
-                print(f"✅ [STAGE 1] Understanding completed in {understanding_duration:.2f}s")
-                print(f"📝 [STAGE 1] Analysis preview: {understanding_output}...")
+                # print(f"✅ [STAGE 1] Understanding completed in {understanding_duration:.2f}s")
+                # print(f"📝 [STAGE 1] Analysis preview: {understanding_output}...")
             else:
                 logger.info("Understanding module disabled")
-                print("⏭️ [STAGE 1] UNDERSTANDING MODULE SKIPPED")
-                print("-" * 40)
+                # print("⏭️ [STAGE 1] UNDERSTANDING MODULE SKIPPED")
+                # print("-" * 40)
                 understanding_output = f"Understanding module disabled. Direct analysis of user question: {user_question}"
-                print(f"📝 [STAGE 1] Using direct question: {user_question}")
+                # print(f"📝 [STAGE 1] Using direct question: {user_question}")
 
             # ===== ITERATIVE EXECUTE-VALIDATE LOOP =====
             for iteration in range(max_turns):
                 logger.info(f"Starting iteration {iteration + 1}/{max_turns}")
-                print(f"\n🔄 [ITERATION {iteration + 1}/{max_turns}] EXECUTE-VALIDATE CYCLE")
-                print("="*60)
+                # print(f"\n🔄 [ITERATION {iteration + 1}/{max_turns}] EXECUTE-VALIDATE CYCLE")
+                # print("="*60)
 
                 # ===== STAGE 2: EXECUTION =====
-                print(f"💻 [ITERATION {iteration + 1}] EXECUTION MODULE")
-                print("-" * 40)
+                # print(f"💻 [ITERATION {iteration + 1}] EXECUTION MODULE")
+                # print("-" * 40)
                 execution_start_time = time.time()
 
                 # Add improvement feedback from previous validation if available
@@ -185,15 +185,15 @@ Please address these specific points in your new analysis approach."""
                 all_execution_results.append(execution_result)
 
                 status_emoji = "✅" if execution_result["success"] else "❌"
-                print(f"{status_emoji} [ITERATION {iteration + 1}] Execution completed in {execution_duration:.2f}s")
-                print(f"🔄 [ITERATION {iteration + 1}] Total turns: {execution_result['total_turns']}")
-                print(f"📊 [ITERATION {iteration + 1}] Code executions: {execution_result.get('execution_summary', {}).get('total_code_executions', 0)}")
+                # print(f"{status_emoji} [ITERATION {iteration + 1}] Execution completed in {execution_duration:.2f}s")
+                # print(f"🔄 [ITERATION {iteration + 1}] Total turns: {execution_result['total_turns']}")
+                # print(f"📊 [ITERATION {iteration + 1}] Code executions: {execution_result.get('execution_summary', {}).get('total_code_executions', 0)}")
 
                 # ===== STAGE 3: VALIDATION (if enabled) =====
                 if enable_validation:
                     logger.info(f"Running validation module for iteration {iteration + 1}")
-                    print(f"\n🔍 [ITERATION {iteration + 1}] VALIDATION MODULE")
-                    print("-" * 40)
+                    # print(f"\n🔍 [ITERATION {iteration + 1}] VALIDATION MODULE")
+                    # print("-" * 40)
                     validation_start_time = time.time()
 
                     validation_result = self.validation_module.reflect(execution_result, user_question, understanding_output)
@@ -201,14 +201,14 @@ Please address these specific points in your new analysis approach."""
                     all_validation_results.append(validation_result)
 
                     validation_emoji = "✅" if validation_result["validation_passed"] else "⚠️"
-                    print(f"{validation_emoji} [ITERATION {iteration + 1}] Validation completed in {validation_duration:.2f}s")
-                    print(f"🎯 [ITERATION {iteration + 1}] Confidence: {validation_result['confidence_score']:.2f}")
-                    print(f"📋 [ITERATION {iteration + 1}] Validation: {'PASSED' if validation_result['validation_passed'] else 'FAILED'}")
+                    # print(f"{validation_emoji} [ITERATION {iteration + 1}] Validation completed in {validation_duration:.2f}s")
+                    # print(f"🎯 [ITERATION {iteration + 1}] Confidence: {validation_result['confidence_score']:.2f}")
+                    # print(f"📋 [ITERATION {iteration + 1}] Validation: {'PASSED' if validation_result['validation_passed'] else 'FAILED'}")
 
                     # Check if we should stop iterating
                     if validation_result['validation_passed']:
                         logger.info(f"Validation passed on iteration {iteration + 1}")
-                        print(f"🎉 [SUCCESS] Validation passed on iteration {iteration + 1}!")
+                        # print(f"🎉 [SUCCESS] Validation passed on iteration {iteration + 1}!")
                         final_answer = validation_result.get('verified_answer', execution_result['answer'])
                         overall_success = True
                         confidence_score = validation_result['confidence_score']
@@ -216,7 +216,7 @@ Please address these specific points in your new analysis approach."""
                         break
                     elif not validation_result.get('requires_reexecution', True):
                         logger.warning("Validation indicates no further improvement possible")
-                        print(f"🛑 [STOPPING] Validation indicates no further improvement possible")
+                        # print(f"🛑 [STOPPING] Validation indicates no further improvement possible")
                         final_answer = execution_result['answer']
                         overall_success = False
                         confidence_score = validation_result['confidence_score']
@@ -224,10 +224,10 @@ Please address these specific points in your new analysis approach."""
                         break
                     else:
                         logger.info(f"Issues found, preparing for iteration {iteration + 2}")
-                        print(f"🔄 [CONTINUE] Issues found, preparing for iteration {iteration + 2}")
+                        # print(f"🔄 [CONTINUE] Issues found, preparing for iteration {iteration + 2}")
                         if iteration == max_turns - 1:
                             logger.warning("Reached maximum iterations without validation")
-                            print(f"⚠️ [MAX ITERATIONS] Reached maximum iterations without validation")
+                            # print(f"⚠️ [MAX ITERATIONS] Reached maximum iterations without validation")
                             final_answer = execution_result['answer']
                             overall_success = False
                             confidence_score = validation_result['confidence_score']
@@ -265,20 +265,21 @@ Please address these specific points in your new analysis approach."""
             total_iterations = len(all_execution_results)
 
             logger.info(f"Analysis completed. Success: {overall_success}, Iterations: {total_iterations}")
-            print("\n" + "="*80)
-            print("🎯 [FINAL SUMMARY]")
-            print("="*80)
-            print(f"Overall Success: {'✅ YES' if overall_success else '❌ NO'}")
-            print(f"Total Iterations: {total_iterations}")
-            print(f"Final Answer: {final_answer}")
-            print(f"Confidence Score: {confidence_score:.2f}/1.0")
-            print(f"Validation Passed: {'✅ YES' if validation_passed else '❌ NO'}")
-            print(f"Total Duration: {total_duration:.2f}s")
-            print("="*80)
+            # print("\n" + "="*80)
+            # print("🎯 [FINAL SUMMARY]")
+            # print("="*80)
+            # print(f"Overall Success: {'✅ YES' if overall_success else '❌ NO'}")
+            # print(f"Total Iterations: {total_iterations}")
+            # print(f"Final Answer: {final_answer}")
+            # print(f"Confidence Score: {confidence_score:.2f}/1.00")
+            # print(f"Validation Passed: {'✅ YES' if validation_passed else '❌ NO'}")
+            # print(f"Total Duration: {total_duration:.2f}s")
+            # print("="*80)
 
             return {
                 "success": overall_success,
                 "answer": final_answer,
+                "length_tokens": len(final_answer.split()) if final_answer else 0,
                 "confidence_score": confidence_score,
                 "validation_passed": validation_passed,
                 "total_iterations": total_iterations,
@@ -295,8 +296,8 @@ Please address these specific points in your new analysis approach."""
         except Exception as e:
             error_duration = time.time() - overall_start_time
             logger.error(f"Critical error: {str(e)}")
-            print(f"❌ [SheetBrain] Critical error: {str(e)}")
-            print(f"⏱️ [SheetBrain] Failed after {error_duration:.2f}s")
+            # print(f"❌ [SheetBrain] Critical error: {str(e)}")
+            # print(f"⏱️ [SheetBrain] Failed after {error_duration:.2f}s")
 
             # Collect conversation histories even in error case
             all_conversation_histories = []
@@ -464,10 +465,13 @@ Please address these specific points in your new analysis approach."""
 
             logger.info(f"Loading Excel file: {self.excel_path}")
             start_time = time.time()
-            workbook = load_workbook(self.excel_path, data_only=True)
+            # Load with data_only=False to preserve formulas (important for copying formulas to new rows)
+            # Note: This means some calculated cells may show the formula instead of the value,
+            # but openpyxl will still provide the cached value in cell.value for most cases
+            workbook = load_workbook(self.excel_path, data_only=False)
             load_time = time.time() - start_time
             logger.info(f"Excel file loaded in {load_time:.2f}s")
-            print(f"📊 [Excel] Loaded in {load_time:.2f}s")
+            # print(f"📊 [Excel] Loaded in {load_time:.2f}s")
 
             # Add libraries to code environment
             self.code_globals.update({
@@ -490,14 +494,14 @@ Please address these specific points in your new analysis approach."""
 
             logger.info("Excel libraries loaded successfully")
             logger.info(f"Available sheets: {workbook.sheetnames}")
-            print("📦 [SheetBrain] Excel libraries loaded successfully")
-            print(f"📊 [SheetBrain] Available sheets: {workbook.sheetnames}")
+            # print("📦 [SheetBrain] Excel libraries loaded successfully")
+            # print(f"📊 [SheetBrain] Available sheets: {workbook.sheetnames}")
 
         except ImportError as e:
             logger.error(f"Failed to import required libraries: {e}")
-            print(f"❌ [SheetBrain] Failed to import required libraries: {e}")
+            # print(f"❌ [SheetBrain] Failed to import required libraries: {e}")
             raise
         except Exception as e:
             logger.error(f"Failed to load Excel file: {e}")
-            print(f"❌ [SheetBrain] Failed to load Excel file: {e}")
+            # print(f"❌ [SheetBrain] Failed to load Excel file: {e}")
             raise
